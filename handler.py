@@ -4,6 +4,14 @@ from io import BytesIO
 from PIL import Image, ImageFilter
 import rembg
 
+# Initialize session with GPU support (falls back to CPU if not available)
+try:
+    session = rembg.new_session(model_name="isnet-general-use", providers=["CUDAExecutionProvider", "CPUExecutionProvider"])
+    print("Successfully initialized rembg session with GPU (isnet-general-use).")
+except Exception as e:
+    print(f"Failed to initialize GPU session: {e}. Falling back to default session.")
+    session = rembg.new_session(model_name="isnet-general-use")
+
 def handler(job):
     job_input = job['input']
     image_base64 = job_input.get('image_base64')
@@ -17,7 +25,7 @@ def handler(job):
 
     # 1. 누끼 따기 (isnet-general-use)
     # Note: In a real production deployment, the model would be pre-downloaded in the Dockerfile
-    mask = rembg.remove(original_img, only_mask=True)
+    mask = rembg.remove(original_img, only_mask=True, session=session)
     
     # 2. 배경 블러 처리 (심도 모방)
     background_blurred = original_img.filter(ImageFilter.GaussianBlur(radius=15))

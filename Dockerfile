@@ -1,17 +1,16 @@
-# Trigger RunPod Rebuild
-FROM python:3.11
+# Use RunPod's official base image which has all system dependencies (libGL, libgomp, CUDA) pre-installed!
+FROM runpod/pytorch:2.1.0-py3.10-cuda11.8.0-devel-ubuntu22.04
 
 WORKDIR /app
 
-# Set U2NET home so the downloaded model saves safely in the working directory (fixes permission crashes)
+# Set U2NET home so the downloaded model saves safely in the working directory
 ENV U2NET_HOME=/app/models
 
-# Install Python dependencies (opencv-python-headless is used to bypass apt-get requirements)
+# We can safely use rembg[gpu] now because this base image has CUDA!
 RUN pip install --no-cache-dir \
     runpod \
     Pillow \
-    opencv-python-headless \
-    rembg \
+    rembg[gpu] \
     numpy
 
 # Copy the handler code

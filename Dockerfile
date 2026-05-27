@@ -2,11 +2,19 @@ FROM python:3.10
 
 WORKDIR /app
 
-# Install Python dependencies using opencv-python-headless
+# Ensure system dependencies for OpenCV are present (fixes libGL.so.1 crash on import)
+RUN apt-get update && apt-get install -y \
+    libgl1-mesa-glx \
+    libglib2.0-0 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set U2NET home so the downloaded model saves safely in the working directory
+ENV U2NET_HOME=/app/models
+
+# Install Python dependencies
 RUN pip install --no-cache-dir \
     runpod \
     Pillow \
-    opencv-python-headless \
     rembg \
     numpy
 

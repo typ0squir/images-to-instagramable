@@ -1,7 +1,8 @@
-# Use RunPod's official pre-cached base image to ensure near-zero cold starts!
-FROM runpod/pytorch:2.1.0-py3.10-cuda11.8.0-devel-ubuntu22.04
+# Use RunPod's official pre-cached base image with CUDA 12.4 to support Blackwell GPUs with near-zero cold starts!
+FROM runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04
 
 WORKDIR /app
+
 
 # Set U2NET home so the downloaded model saves safely
 ENV U2NET_HOME=/app/models

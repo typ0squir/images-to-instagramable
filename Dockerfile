@@ -24,7 +24,8 @@ RUN pip install --no-cache-dir \
     diffusers \
     transformers \
     accelerate \
-    peft
+    peft \
+    opencv-python-headless
 
 # Pre-download the rembg models during docker build
 RUN python -c "import rembg; rembg.new_session('isnet-general-use')"

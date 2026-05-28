@@ -3,6 +3,9 @@ FROM runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04
 
 WORKDIR /app
 
+# Force a clean BuildKit cache bust to completely bypass corrupted cloud builder cache blobs
+ENV CACHE_BUST=magic_studio_v2_2026_05_28_16_20
+
 # Upgrade PyTorch, torchvision, and torchaudio to a Blackwell-compatible version (Compute Capability 10.0+ / sm_100 / sm_120)
 # using the official CUDA 12.4 wheel repository. This fixes the runtime health check crash loops!
 RUN pip install --no-cache-dir --upgrade torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128

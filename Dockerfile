@@ -5,7 +5,7 @@ WORKDIR /app
 
 # Upgrade PyTorch, torchvision, and torchaudio to a Blackwell-compatible version (Compute Capability 10.0+ / sm_100 / sm_120)
 # using the official CUDA 12.4 wheel repository. This fixes the runtime health check crash loops!
-RUN pip install --no-cache-dir --upgrade torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
+RUN pip install --no-cache-dir --upgrade torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
 
 # Set library path to include pip-installed cuDNN 9 libraries for ONNX Runtime GPU and PyTorch compatibility
 ENV LD_LIBRARY_PATH=/usr/local/lib/python3.11/dist-packages/nvidia/cudnn/lib:$LD_LIBRARY_PATH

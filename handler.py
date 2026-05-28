@@ -62,7 +62,10 @@ def pad_to_aspect_ratio(image, target_ratio=1.0, fill_color=(0, 0, 0, 255)):
         new_w = int(h * target_ratio)
         
     mode = image.mode
-    if "A" in mode or (len(fill_color) == 4 and fill_color[3] < 255):
+    if mode == "L":
+        color = fill_color if isinstance(fill_color, int) else fill_color[0]
+        canvas = Image.new("L", (new_w, new_h), color)
+    elif "A" in mode or (len(fill_color) == 4 and fill_color[3] < 255):
         canvas = Image.new("RGBA", (new_w, new_h), fill_color)
     else:
         canvas = Image.new("RGB", (new_w, new_h), fill_color[:3])

@@ -2,7 +2,7 @@
 FROM runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04
 
 # Force a clean BuildKit cache bust to completely bypass corrupted cloud builder cache blobs
-ENV CACHE_BUST=magic_studio_v2_2026_05_28_16_38
+ENV CACHE_BUST=magic_studio_v2_2026_05_28_17_15
 
 WORKDIR /app
 

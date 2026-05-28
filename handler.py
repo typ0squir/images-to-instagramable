@@ -113,6 +113,66 @@ def crop_to_aspect_ratio(image, target_ratio=1.0):
     print(f"Cropped image from original {w}x{h} to proportioned {new_w}x{new_h} (Center-Top Focused)")
     return image.crop((x1, y1, x1 + new_w, y1 + new_h))
 
+def crop_to_subject_aspect_ratio(image, target_ratio=1.0, zoom_factor=1.35):
+    """
+    Aesthetically crops and zooms in on the foreground subject using rembg segmentation.
+    - target_ratio: 1.0 (for 1:1) or 0.8 (for 4:5)
+    - zoom_factor: How tightly to focus on the subject. 1.35 means the crop box will be 
+      1.35 times the size of the subject's bounding box, providing a beautiful close-up.
+    """
+    print("Detecting subject bounding box for pro DSLR zoom framing...")
+    try:
+        mask = rembg.remove(image, only_mask=True, session=rembg_session)
+        bbox = mask.getbbox() # (left, upper, right, lower)
+        if bbox is None:
+            raise Exception("No subject detected by rembg")
+    except Exception as e:
+        print(f"Subject detection failed ({e}). Falling back to center-top crop.")
+        return crop_to_aspect_ratio(image, target_ratio)
+        
+    w, h = image.size
+    left, upper, right, lower = bbox
+    sub_w = right - left
+    sub_h = lower - upper
+    
+    # Calculate center of the subject
+    center_x = left + sub_w / 2
+    center_y = upper + sub_h / 2
+    
+    # Calculate target crop box size based on subject size and target aspect ratio
+    if target_ratio >= 1.0:
+        box_size = int(max(sub_w, sub_h) * zoom_factor)
+        crop_w = box_size
+        crop_h = box_size
+    else:
+        box_w = int(max(sub_w, sub_h * target_ratio) * zoom_factor)
+        crop_w = box_w
+        crop_h = int(box_w / target_ratio)
+
+    # Limit crop size to not exceed original image dimensions
+    crop_w = min(crop_w, w, h)
+    crop_h = int(crop_w / target_ratio)
+    if crop_h > h:
+        crop_h = h
+        crop_w = int(h * target_ratio)
+        
+    # Position the crop box centered on the subject
+    x1 = int(center_x - crop_w / 2)
+    y1 = int(center_y - crop_h / 2)
+    
+    # Special upward shift (8% of crop height) to capture a bit of background above the cups
+    upward_shift = int(crop_h * 0.08)
+    y1 = y1 - upward_shift
+    
+    # Adjust coordinates to stay within image boundaries
+    x1 = max(0, min(x1, w - crop_w))
+    y1 = max(0, min(y1, h - crop_h))
+    x2 = x1 + crop_w
+    y2 = y1 + crop_h
+    
+    print(f"DSLR Zoom Crop: Focused on subject at center ({center_x:.1f}, {center_y:.1f}), cropped to {crop_w}x{crop_h}")
+    return image.crop((x1, y1, x2, y2))
+
 def pad_to_aspect_ratio(image, target_ratio=1.0, fill_color=(0, 0, 0, 255)):
     """Pads an image to match a specific target aspect ratio by centering it on a new canvas."""
     w, h = image.size
@@ -142,7 +202,7 @@ def pad_to_aspect_ratio(image, target_ratio=1.0, fill_color=(0, 0, 0, 255)):
 def handler(job):
     job_input = job['input']
     image_base64 = job_input.get('image_base64')
-    mode = job_input.get('mode', 'overlay') # Default to overlay now to perfectly retouch the original space!
+    mode = job_input.get('mode', 'inpaint') # Default to inpaint to fully replace messy background with premium studio space!
     
     if not image_base64:
         return {"error": "No image provided"}
@@ -177,7 +237,7 @@ def handler(job):
         # --- PRO-LEVEL CRITICAL UPGRADE: Perform Aesthetic Crop at the absolute start of the pipeline! ---
         # This instantly changes the camera height/zoom perspective and completely eliminates black borders!
         print(f"Applying pro-level aesthetic crop to target ratio: {target_ratio_str}...")
-        cropped_base = crop_to_aspect_ratio(original_img, target_ratio=target_ratio)
+        cropped_base = crop_to_subject_aspect_ratio(original_img, target_ratio=target_ratio)
         
         # Step 1: Background Segmentation on cropped image
         print("Executing zero-shot segmentation using rembg...")

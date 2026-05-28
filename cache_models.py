@@ -2,11 +2,12 @@ import torch
 from diffusers import StableDiffusionInpaintPipeline
 
 def cache_models():
-    print("Starting pre-downloading and caching of RunwayML SD 1.5 Inpainting weights...")
+    print("Starting pre-downloading and caching of RunwayML SD 1.5 Inpainting weights (fp16 variant)...")
     pipe = StableDiffusionInpaintPipeline.from_pretrained(
         "runwayml/stable-diffusion-inpainting",
         torch_dtype=torch.float16,
         safety_checker=None,
+        variant="fp16",
         use_safetensors=True
     )
     

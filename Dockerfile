@@ -3,9 +3,12 @@ FROM runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04
 
 WORKDIR /app
 
+# Upgrade PyTorch inside the pre-cached image to the latest stable release (v2.5.1+) supporting Blackwell sm_100 architecture
+RUN pip install --no-cache-dir --upgrade torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
 
 # Set U2NET home so the downloaded model saves safely
 ENV U2NET_HOME=/app/models
+
 
 # Install Python dependencies. Since we are using virtualenv/system pip in this pre-configured image, 
 # we do not need --break-system-packages.

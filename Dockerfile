@@ -33,8 +33,8 @@ RUN python -c "import rembg; rembg.new_session('isnet-general-use')"
 COPY v2_aesthetic_lora_model /app/v2_aesthetic_lora_model
 COPY cache_models.py .
 
-# Pre-download and cache Stable Diffusion, IP-Adapter, and CLIP image encoder weights
-RUN python cache_models.py
+# Pre-download and cache Stable Diffusion, IP-Adapter, and CLIP image encoder weights are skipped to maintain a lightweight image (~1.5GB)
+# RunwayML models will load dynamically and persist on RunPod's mounted network volume.
 
 # Copy the handler code
 COPY handler.py .

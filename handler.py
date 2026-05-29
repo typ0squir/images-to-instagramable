@@ -113,12 +113,12 @@ def crop_to_aspect_ratio(image, target_ratio=1.0):
     print(f"Cropped image from original {w}x{h} to proportioned {new_w}x{new_h} (Center-Top Focused)")
     return image.crop((x1, y1, x1 + new_w, y1 + new_h))
 
-def crop_to_subject_aspect_ratio(image, target_ratio=1.0, zoom_factor=1.35):
+def crop_to_subject_aspect_ratio(image, target_ratio=1.0, zoom_factor=1.12):
     """
     Aesthetically crops and zooms in on the foreground subject using rembg segmentation.
     - target_ratio: 1.0 (for 1:1) or 0.8 (for 4:5)
-    - zoom_factor: How tightly to focus on the subject. 1.35 means the crop box will be 
-      1.35 times the size of the subject's bounding box, providing a beautiful close-up.
+    - zoom_factor: How tightly to focus on the subject. 1.12 means the crop box will be 
+      1.12 times the size of the subject's bounding box, providing a beautiful close-up.
     """
     print("Detecting subject bounding box for pro DSLR zoom framing...")
     try:
@@ -311,7 +311,7 @@ def handler(job):
                 image=init_sd,
                 mask_image=inpaint_mask_sd,
                 control_image=[depth_map, canny_map],
-                controlnet_conditioning_scale=[0.55, 0.35],
+                controlnet_conditioning_scale=[0.40, 0.20],
                 ip_adapter_image=ref_rgb,
                 strength=0.95,
                 guidance_scale=7.5,
@@ -333,7 +333,7 @@ def handler(job):
                 image=hybrid_composite,
                 mask_image=white_mask,
                 control_image=[depth_map, canny_map],
-                controlnet_conditioning_scale=[0.60, 0.40],
+                controlnet_conditioning_scale=[0.45, 0.25],
                 ip_adapter_image=ref_rgb,
                 strength=denoising_strength,
                 guidance_scale=7.5,

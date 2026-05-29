@@ -7,11 +7,15 @@ import numpy as np
 from io import BytesIO
 from PIL import Image, ImageOps, ImageFilter
 import rembg
-from diffusers import StableDiffusionControlNetInpaintPipeline, ControlNetModel
+from diffusers import (
+    StableDiffusionXLControlNetImg2ImgPipeline,
+    ControlNetModel,
+    AutoencoderKL
+)
 from transformers import pipeline as hf_pipeline
 
 # 1. Global Model Loading & Optimization
-print("Initializing RunPod Serverless Advanced Multi-ControlNet AI Pipeline with Pro-Cropping...")
+print("Initializing RunPod Serverless Advanced SDXL Multi-ControlNet AI Pipeline...")
 
 # Initialize rembg session with GPU support
 try:
@@ -30,43 +34,48 @@ try:
 except Exception as e:
     print(f"Failed to load Depth Estimation model: {e}. Fallback depth mapping will be disabled.")
 
-# Load Stable Diffusion ControlNet Inpainting pipeline
+# Load Stable Diffusion XL ControlNet Img2Img pipeline
 pipe = None
 try:
-    print("Loading SD 1.5 ControlNet Canny and Depth models...")
-    controlnet_canny = ControlNetModel.from_pretrained(
-        "lllyasviel/sd-controlnet-canny",
-        torch_dtype=torch.float16
-    )
+    print("Loading SDXL ControlNet Canny and Depth models (fp16 variants)...")
     controlnet_depth = ControlNetModel.from_pretrained(
-        "lllyasviel/sd-controlnet-depth",
-        torch_dtype=torch.float16
-    )
-    
-    print("Loading RunwayML SD 1.5 Inpainting base weights with Multi-ControlNet...")
-    pipe = StableDiffusionControlNetInpaintPipeline.from_pretrained(
-        "runwayml/stable-diffusion-inpainting",
-        controlnet=[controlnet_depth, controlnet_canny],
+        "diffusers/controlnet-depth-sdxl-1.0",
         torch_dtype=torch.float16,
-        safety_checker=None,
         variant="fp16",
         use_safetensors=True
-    ).to("cuda")
+    )
+    controlnet_canny = ControlNetModel.from_pretrained(
+        "diffusers/controlnet-canny-sdxl-1.0",
+        torch_dtype=torch.float16,
+        variant="fp16",
+        use_safetensors=True
+    )
     
-    print("Loading Custom Instagram Aesthetic LoRA weights...")
-    lora_path = os.path.abspath("v2_aesthetic_lora_model")
-    pipe.load_lora_weights(lora_path)
+    print("Loading stabilityai SDXL Base 1.0 with VAE fix...")
+    vae = AutoencoderKL.from_pretrained(
+        "madebyollin/sdxl-vae-fp16-fix",
+        torch_dtype=torch.float16
+    )
     
-    print("Loading IP-Adapter weights for visual aesthetic guidance...")
-    pipe.load_ip_adapter("h94/IP-Adapter", subfolder="models", weight_name="ip-adapter_sd15.bin")
+    pipe = StableDiffusionXLControlNetImg2ImgPipeline.from_pretrained(
+        "stabilityai/stable-diffusion-xl-base-1.0",
+        controlnet=[controlnet_depth, controlnet_canny],
+        vae=vae,
+        torch_dtype=torch.float16,
+        variant="fp16",
+        use_safetensors=True
+    )
+    
+    print("Loading SDXL IP-Adapter weights for aesthetic guidance...")
+    pipe.load_ip_adapter("h94/IP-Adapter", subfolder="sdxl_models", weight_name="ip-adapter_sdxl.bin")
     
     # Apply aggressive memory optimization to support Blackwell Serverless MIG profile
-    print("Applying PyTorch CPU offloading and VAE slicing optimizations...")
+    print("Applying PyTorch CPU offloading and VAE slicing optimizations for SDXL...")
     pipe.enable_model_cpu_offload()
     pipe.enable_vae_slicing()
-    print("Multi-ControlNet AI pipeline initialized successfully and ready!")
+    print("SDXL Multi-ControlNet AI pipeline initialized successfully and ready!")
 except Exception as e:
-    print(f"WARNING: Could not load the full AI pipeline ({e}). Fast CPU/GPU fallback will be used.")
+    print(f"WARNING: Could not load the full SDXL AI pipeline ({e}). Fast CPU/GPU fallback will be used.")
 
 def extract_canny_map(img, low_threshold=100, high_threshold=200):
     """Extracts Canny Edge map as an RGB PIL Image."""
@@ -202,7 +211,6 @@ def pad_to_aspect_ratio(image, target_ratio=1.0, fill_color=(0, 0, 0, 255)):
 def handler(job):
     job_input = job['input']
     image_base64 = job_input.get('image_base64')
-    mode = job_input.get('mode', 'inpaint') # Default to inpaint to fully replace messy background with premium studio space!
     
     if not image_base64:
         return {"error": "No image provided"}
@@ -211,9 +219,9 @@ def handler(job):
     image_data = base64.b64decode(image_base64)
     original_img = Image.open(BytesIO(image_data)).convert("RGB")
     
-    # Check if the advanced AI pipeline is loaded. If not, use the fast rembg fallback.
+    # Check if the advanced SDXL pipeline is loaded. If not, use the fast rembg fallback.
     if not pipe:
-        print("AI pipeline not active. Running fast background blur fallback...")
+        print("SDXL AI pipeline not active. Running fast background blur fallback...")
         mask = rembg.remove(original_img, only_mask=True, session=rembg_session)
         background_blurred = original_img.filter(ImageFilter.GaussianBlur(radius=15))
         composite = Image.composite(original_img, background_blurred, mask)
@@ -232,140 +240,120 @@ def handler(job):
         # Core Parameters
         target_ratio_str = job_input.get('aspect_ratio', '1:1')
         target_ratio = 1.0 if target_ratio_str == '1:1' else 0.8
-        sd_size = (512, 512) if target_ratio_str == '1:1' else (512, 640)
+        
+        # Native SDXL resolution planning
+        if target_ratio_str == '1:1':
+            sdxl_size = (1024, 1024)
+        else:
+            sdxl_size = (832, 1024) # Native SDXL-friendly vertical aspect ratio
+            
+        print(f"SDXL Target aspect ratio: {target_ratio_str}, resolution: {sdxl_size[0]}x{sdxl_size[1]}")
         
         # --- PRO-LEVEL CRITICAL UPGRADE: Perform Aesthetic Crop at the absolute start of the pipeline! ---
         # This instantly changes the camera height/zoom perspective and completely eliminates black borders!
         print(f"Applying pro-level aesthetic crop to target ratio: {target_ratio_str}...")
-        cropped_base = crop_to_subject_aspect_ratio(original_img, target_ratio=target_ratio)
+        cropped_base = crop_to_subject_aspect_ratio(original_img, target_ratio=target_ratio, zoom_factor=1.12)
         
-        # Step 1: Background Segmentation on cropped image
+        # Step 1: Background Segmentation on cropped image to lock the foreground mask
         print("Executing zero-shot segmentation using rembg...")
         fg_rgba = rembg.remove(cropped_base, session=rembg_session)
         alpha = fg_rgba.split()[3]
         
-        # Step 2: IP-Adapter Reference Image Preparation (Aspect Ratio Protected)
-        # Using a black background as "empty space" to guide CLIP focus purely on the cropped product
-        print("Preparing aspect ratio protected IP-Adapter reference...")
-        ref_padded, _, _, _, _ = pad_to_aspect_ratio(fg_rgba, target_ratio=1.0, fill_color=(0, 0, 0, 255))
-        ref_rgb = ref_padded.convert("RGB").resize((512, 512), Image.Resampling.LANCZOS)
+        # Step 2: IP-Adapter Reference Image Preparation (Self-contained)
+        # Check if reference_base64 is provided. If not, fallback to local preset style image.
+        reference_base64 = job_input.get('reference_base64')
+        if reference_base64:
+            print("Decoding dynamic IP-Adapter style reference from API input...")
+            ref_data = base64.b64decode(reference_base64)
+            ref_img = Image.open(BytesIO(ref_data)).convert("RGB")
+        else:
+            theme = job_input.get('theme', 'wood')
+            if theme == 'cafe':
+                ref_path = "style_cafe.jpg"
+            else:
+                ref_path = "style_wood.jpg"
+                
+            if os.path.exists(ref_path):
+                print(f"Loading local preset reference style image: {ref_path}...")
+                ref_img = Image.open(ref_path).convert("RGB")
+            else:
+                print("Local reference image not found. Using cropped foreground as style seed fallback.")
+                ref_padded, _, _, _, _ = pad_to_aspect_ratio(fg_rgba, target_ratio=1.0, fill_color=(0, 0, 0, 255))
+                ref_img = ref_padded.convert("RGB")
+                
+        ref_img_resized = ref_img.resize((1024, 1024), Image.Resampling.LANCZOS)
         
         # Setup Prompts
-        prompt = job_input.get('prompt', "A smooth premium wooden cafe table surface in sharp focus, beautifully heavy blurred window background, out of focus street, bokeh, aesthetic pinterest photography, warm natural sunlight, vivid korean cafe mood, professional interior photography, 8k resolution, photorealistic")
-        negative_prompt = job_input.get('negative_prompt', "cars, traffic, messy street, clear background, sharp background, artificial, 3d render, plastic, flat lighting, harsh shadows")
-        ip_adapter_scale = float(job_input.get('ip_adapter_scale', 0.65))
+        # Detailed preset prompt designed to match raw cafe elements (iced coffee in clear plastic cup, white paper cup, phone screen)
+        # but generic enough to beautifully style any wooden table composition with out-of-focus street lights.
+        default_prompt = (
+            "A close-up aesthetic photograph of a dark iced coffee in a clear plastic cup with a red straw, "
+            "a white paper coffee cup with a black straw, and a smartphone sitting on a premium warm wooden cafe table surface. "
+            "Beautifully heavy blurred window background, out of focus street, volumetric bokeh, warm natural sunlight, "
+            "vivid korean cafe mood, professional interior photography, 8k resolution, photorealistic"
+        )
+        prompt = job_input.get('prompt', default_prompt)
+        negative_prompt = job_input.get('negative_prompt', "person, hands, clear background, sharp background, artificial, 3d render, plastic, flat lighting, harsh shadows, low quality, bad aesthetics, distorted")
+        
+        # IP-Adapter Weight Scale tuning to prevent background overfitting while adopting premium tones
+        ip_adapter_scale = float(job_input.get('ip_adapter_scale', 0.50))
         pipe.set_ip_adapter_scale(ip_adapter_scale)
+        print(f"IP-Adapter Influence Scale: {ip_adapter_scale}")
 
-        # Mode Routing
-        if mode == "overlay":
-            # --- OVERLAY MODE: 0.2 Denoising Glaze over cropped aesthetic scene ---
-            print("Executing Overlay Mode (0.2 Denoising Glaze over cropped canvas)...")
-            init_sd = cropped_base.resize(sd_size, Image.Resampling.LANCZOS)
-            
-            # Extract maps for the ControlNets even in overlay to reinforce the cropped structure
-            canny_map = extract_canny_map(init_sd)
-            depth_map = extract_depth_map(init_sd, sd_size)
-            
-            white_mask = Image.new("L", sd_size, 255)
-            denoising_strength = float(job_input.get('denoising_strength', 0.20))
-            
-            final_harmonized = pipe(
-                prompt=prompt,
-                negative_prompt=negative_prompt,
-                image=init_sd,
-                mask_image=white_mask,
-                control_image=[depth_map, canny_map],
-                controlnet_conditioning_scale=[0.60, 0.40],
-                ip_adapter_image=ref_rgb,
-                strength=denoising_strength,
-                guidance_scale=7.5,
-                num_inference_steps=25
-            ).images[0]
-            
-        else:
-            # --- INPAINT MODE: Locked-Structure Environment Upgrade over cropped canvas ---
-            print("Executing Multi-ControlNet Inpaint & Composite Mode over cropped canvas...")
-            
-            # Since the base image is already cropped to the target aspect ratio,
-            # padding here acts as a zero-op fallback, avoiding black border creations!
-            padded_img, x_off, y_off, pad_w, pad_h = pad_to_aspect_ratio(cropped_base, target_ratio=target_ratio, fill_color=(0, 0, 0, 255))
-            padded_alpha, _, _, _, _ = pad_to_aspect_ratio(alpha, target_ratio=target_ratio, fill_color=(0, 0, 0, 0))
-            
-            inpaint_mask = ImageOps.invert(padded_alpha)
-            composite_mask = padded_alpha.filter(ImageFilter.GaussianBlur(radius=1.5))
-            
-            # Resize
-            init_sd = padded_img.resize(sd_size, Image.Resampling.LANCZOS)
-            inpaint_mask_sd = inpaint_mask.resize(sd_size, Image.Resampling.NEAREST)
-            composite_mask_sd = composite_mask.resize(sd_size, Image.Resampling.LANCZOS)
-            
-            # Extract structures using Multi-ControlNet to lock the cropped table edge and window frames
-            canny_map = extract_canny_map(init_sd)
-            depth_map = extract_depth_map(init_sd, sd_size)
-            
-            # Step 4: AI Inpainting with Multi-ControlNet locking background frames
-            print("Generating new background with Multi-ControlNet constraint...")
-            generated_bg = pipe(
-                prompt=prompt,
-                negative_prompt=negative_prompt,
-                image=init_sd,
-                mask_image=inpaint_mask_sd,
-                control_image=[depth_map, canny_map],
-                controlnet_conditioning_scale=[0.40, 0.20],
-                ip_adapter_image=ref_rgb,
-                strength=0.95,
-                guidance_scale=7.5,
-                num_inference_steps=25
-            ).images[0]
-            
-            # Step 5: Sharp Foreground Re-Composite
-            print("Compositing original product foreground back over AI background...")
-            hybrid_composite = Image.composite(init_sd, generated_bg, composite_mask_sd)
-            
-            # Step 6: Global Finishing Glaze (Harmonization)
-            print("Applying global harmonization glaze...")
-            white_mask = Image.new("L", sd_size, 255)
-            denoising_strength = float(job_input.get('denoising_strength', 0.12))
-            
-            final_harmonized = pipe(
-                prompt=prompt,
-                negative_prompt=negative_prompt,
-                image=hybrid_composite,
-                mask_image=white_mask,
-                control_image=[depth_map, canny_map],
-                controlnet_conditioning_scale=[0.45, 0.25],
-                ip_adapter_image=ref_rgb,
-                strength=denoising_strength,
-                guidance_scale=7.5,
-                num_inference_steps=20
-            ).images[0]
-
-        # Step 7: Resize back to High Resolution and Protect Brand Logos/Text
-        final_output_size = (1024, 1024) if target_ratio_str == '1:1' else (1024, 1280)
-        final_img = final_harmonized.resize(final_output_size, Image.Resampling.LANCZOS)
+        # Step 3: Extract ControlNet Maps directly at native SDXL resolution
+        print("Extracting multi-structural maps at SDXL native resolution...")
+        cropped_base_resized = cropped_base.resize(sdxl_size, Image.Resampling.LANCZOS)
+        canny_map = extract_canny_map(cropped_base_resized)
+        depth_map = extract_depth_map(cropped_base_resized, sdxl_size)
         
-        # --- PRO-LEVEL CRITICAL TEXT & LOGO PROTECTION: Paste original pixels back using eroded inner mask ---
-        print("Pasting razor-sharp original brand logos, text, and phone screens back onto final image...")
+        # Img2Img denoising strength (Img2Img strength controls creativity vs structural rigidity)
+        denoising_strength = float(job_input.get('denoising_strength', 0.45))
+        print(f"SDXL Denoising Strength: {denoising_strength}")
+        
+        # Step 4: Run SDXL Multi-ControlNet + IP-Adapter Rendering
+        print("Rendering premium aesthetic background using SDXL pipeline...")
+        ai_rendered = pipe(
+            prompt=prompt,
+            negative_prompt=negative_prompt,
+            image=cropped_base_resized,
+            control_image=[depth_map, canny_map],
+            ip_adapter_image=ref_img_resized,
+            controlnet_conditioning_scale=[0.60, 0.40], # Depth maintains cup/straw shapes, Canny captures edges
+            num_inference_steps=30,
+            strength=denoising_strength,
+            guidance_scale=7.0
+        ).images[0]
+        
+        # Step 5: Sharp Foreground Re-Composite
+        # Paste the original high-resolution foreground objects back over the AI-generated background
+        print("Compositing original product foreground back over newly rendered background...")
+        alpha_resized = alpha.resize(sdxl_size, Image.Resampling.LANCZOS)
+        # Slightly blur the blending edge for a seamless lighting transition
+        composite_mask = alpha_resized.filter(ImageFilter.GaussianBlur(radius=1.5))
+        
+        hybrid_composite = Image.composite(cropped_base_resized, ai_rendered, composite_mask)
+        
+        # Step 6: Brand Logos and Smartphone Screen Protection Overlay (Eroded Mask)
+        # This completely guarantees that there is zero text blurring or screen content replacement!
+        print("Applying eroded inner-mask overlay to protect brand logos, texts, and screens...")
         try:
-            high_res_original = cropped_base.resize(final_output_size, Image.Resampling.LANCZOS)
-            high_res_alpha = alpha.resize(final_output_size, Image.Resampling.LANCZOS)
+            # Erode the mask by ~15 pixels to protect only the center features and keep borders harmonized
+            eroded_inner_mask = alpha_resized.filter(ImageFilter.MinFilter(size=15))
+            # Soften the edges of this inner shield for a flawless pixel-level blend
+            eroded_inner_mask = eroded_inner_mask.filter(ImageFilter.GaussianBlur(radius=3))
             
-            # Erode the mask by ~15 pixels to keep border harmonization but lock inner brand marks
-            high_res_inner_mask = high_res_alpha.filter(ImageFilter.MinFilter(size=15))
-            # Soften the edges of the inner mask slightly for a flawless blend
-            high_res_inner_mask = high_res_inner_mask.filter(ImageFilter.GaussianBlur(radius=3))
-            
-            # Composite the high-res original back over the AI harmonized image!
-            final_img = Image.composite(high_res_original, final_img, high_res_inner_mask)
-            print("Successfully protected and restored high-resolution text and brand logos!")
+            # Composite original sharp logo/screen pixels back onto the hybrid image
+            final_img = Image.composite(cropped_base_resized, hybrid_composite, eroded_inner_mask)
+            print("Successfully protected and restored high-resolution text and brand marks!")
         except Exception as protect_err:
-            print(f"Failed logo protection overlay: {protect_err}. Proceeding with base harmonized image.")
-        
+            print(f"Failed logo protection overlay: {protect_err}. Using hybrid composite as fallback.")
+            final_img = hybrid_composite
+            
         # Clean up VRAM memory pointers
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
             
-        print("AI rendering workflow complete!")
+        print("SDXL Method B pipeline rendering complete!")
         
         # Encode back to base64
         buffered = BytesIO()
@@ -375,11 +363,11 @@ def handler(job):
         return {
             "status": "success",
             "output_image_base64": result_base64,
-            "pipeline": f"stable_diffusion_controlnet_{mode}"
+            "pipeline": "sdxl_multi_controlnet_method_b"
         }
         
     except Exception as e:
-        print(f"Error during AI rendering: {e}. Executing fast rembg blur fallback.")
+        print(f"Error during SDXL AI rendering: {e}. Executing fast rembg blur fallback.")
         try:
             mask = rembg.remove(original_img, only_mask=True, session=rembg_session)
             background_blurred = original_img.filter(ImageFilter.GaussianBlur(radius=15))
@@ -396,7 +384,7 @@ def handler(job):
                 "error_details": str(e)
             }
         except Exception as fallback_err:
-            return {"error": f"AI pipeline failed and fallback crashed: {fallback_err}"}
+            return {"error": f"SDXL pipeline failed and fallback crashed: {fallback_err}"}
 
 # Start the serverless handler
 if __name__ == "__main__":

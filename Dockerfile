@@ -2,7 +2,7 @@
 FROM runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04
 
 # Force a clean BuildKit cache bust to completely bypass corrupted cloud builder cache blobs
-ENV CACHE_BUST=magic_studio_v2_2026_05_29_13_28
+ENV CACHE_BUST=magic_studio_v2_sdxl_2026_05_29_16_10
 
 WORKDIR /app
 
@@ -33,12 +33,10 @@ RUN pip install --no-cache-dir \
 # Pre-download the rembg models during docker build
 RUN python -c "import rembg; rembg.new_session('isnet-general-use')"
 
-# Copy custom LoRA weights and cache script
-COPY v2_aesthetic_lora_model /app/v2_aesthetic_lora_model
+# Copy custom preset style images and cache script
+COPY style_wood.jpg /app/style_wood.jpg
+COPY style_cafe.jpg /app/style_cafe.jpg
 COPY cache_models.py .
-
-# Pre-download and cache Stable Diffusion, IP-Adapter, and CLIP image encoder weights are skipped to maintain a lightweight image (~1.5GB)
-# RunwayML models will load dynamically and persist on RunPod's mounted network volume.
 
 # Copy the handler code
 COPY handler.py .

@@ -340,9 +340,26 @@ def handler(job):
                 num_inference_steps=20
             ).images[0]
 
-        # Step 7: Resize back to High Resolution
+        # Step 7: Resize back to High Resolution and Protect Brand Logos/Text
         final_output_size = (1024, 1024) if target_ratio_str == '1:1' else (1024, 1280)
         final_img = final_harmonized.resize(final_output_size, Image.Resampling.LANCZOS)
+        
+        # --- PRO-LEVEL CRITICAL TEXT & LOGO PROTECTION: Paste original pixels back using eroded inner mask ---
+        print("Pasting razor-sharp original brand logos, text, and phone screens back onto final image...")
+        try:
+            high_res_original = cropped_base.resize(final_output_size, Image.Resampling.LANCZOS)
+            high_res_alpha = alpha.resize(final_output_size, Image.Resampling.LANCZOS)
+            
+            # Erode the mask by ~15 pixels to keep border harmonization but lock inner brand marks
+            high_res_inner_mask = high_res_alpha.filter(ImageFilter.MinFilter(size=15))
+            # Soften the edges of the inner mask slightly for a flawless blend
+            high_res_inner_mask = high_res_inner_mask.filter(ImageFilter.GaussianBlur(radius=3))
+            
+            # Composite the high-res original back over the AI harmonized image!
+            final_img = Image.composite(high_res_original, final_img, high_res_inner_mask)
+            print("Successfully protected and restored high-resolution text and brand logos!")
+        except Exception as protect_err:
+            print(f"Failed logo protection overlay: {protect_err}. Proceeding with base harmonized image.")
         
         # Clean up VRAM memory pointers
         if torch.cuda.is_available():
